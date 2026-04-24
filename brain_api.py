@@ -164,18 +164,20 @@ def process_clone(request: CloneRequest):
 
     try:
         cleaned = raw_response.strip()
-
         cleaned = cleaned.replace("```json", "").replace("```", "").strip()
 
         data = json.loads(cleaned)
+
+        confidence = int(data.get("confidence", 50))
+        status = "auto_sent" if confidence >= 90 else "pending"
 
         return CloneResponse(
             original_sender=request.sender_name,
             original_message=request.message_text,
             clone_draft=data.get("draft", ""),
-            confidence_score=int(data.get("confidence", 50)),
+            confidence_score=confidence,
             reasoning=data.get("reasoning", "Generated using retrieved persona memory."),
-            status="pending"
+            status=status
         )
 
     except Exception:

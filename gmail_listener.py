@@ -1,15 +1,19 @@
 import os
+import re
 import imaplib
 import email
 import time
 import requests
+import smtplib
 from email.header import decode_header
+from email.mime.text import MIMEText
 from dotenv import load_dotenv
 
 BASE_DIR = os.path.dirname(__file__)
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 
 load_dotenv(dotenv_path=ENV_PATH)
+
 
 def _clean_env_value(name):
     value = os.getenv(name)
@@ -84,7 +88,7 @@ def extract_body(msg):
                 payload = part.get_payload(decode=True)
 
                 if payload:
-                    body = payload.decode(errors="ignore")
+                    body = payload.decode("utf-8", errors="ignore")
                     break
     else:
         payload = msg.get_payload(decode=True)
@@ -108,13 +112,33 @@ def send_to_brain(sender, subject, body):
         return response.json()
 
     return {
-        "error": response.text
+        "error": response.text,
+        "status": "error"
     }
+
+
+def extract_email_address(sender):
+    match = re.search(r"<(.+?)>", sender)
+    return match.group(1) if match else sender
+
+
+def send_email_reply(to_email, subject, body):
+    msg = MIMEText(body)
+    msg["Subject"] = f"Re: {subject}"
+    msg["From"] = EMAIL
+    msg["To"] = to_email
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(EMAIL, APP_PASSWORD.replace(" ", ""))
+        server.send_message(msg)
+
+    print("AUTO REPLY SENT SUCCESSFULLY")
 
 
 def listen_for_emails():
     try:
         validate_config()
+
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL, APP_PASSWORD.replace(" ", ""))
         mail.select("inbox")
@@ -148,6 +172,15 @@ def listen_for_emails():
                 print("Reasoning:", brain_response.get("reasoning"))
                 print("Status:", brain_response.get("status"))
 
+                status = brain_response.get("status")
+                draft = brain_response.get("clone_draft")
+
+                if status == "auto_sent" and draft:
+                    to_email = extract_email_address(sender)
+                    send_email_reply(to_email, subject, draft)
+                else:
+                    print("Reply kept pending for manual approval.")
+
         mail.logout()
 
     except imaplib.IMAP4.error as e:
@@ -160,11 +193,12 @@ def listen_for_emails():
                 "not your normal Gmail password."
             )
             print(
-                "Also make sure 2-Step Verification is enabled on that Google account "
-                "and paste the App Password into .env without quotes."
+                "Also make sure 2-Step Verification is enabled and paste the App Password "
+                "into .env without quotes."
             )
         else:
             print("Error:", e)
+
     except Exception as e:
         print("Error:", e)
 
@@ -172,4 +206,4 @@ def listen_for_emails():
 if __name__ == "__main__":
     while True:
         listen_for_emails()
-        time.sleep(60)
+        time.sleep(90)
